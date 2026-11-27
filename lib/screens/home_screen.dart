@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:memory_cards/screens/create_entery_screen.dart';
 import '../models/entry.dart';
 import '../utils/storage.dart';
 import '../widgets/entry_card.dart';
-import 'settings_screen.dart' show SettingsScreen;
-
+import 'create_entery_screen.dart';
+import 'create_entry_screen.dart';
+import 'entry_detail_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,12 +15,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Stage 3: starts empty, filled from storage in initState.
   List<Entry> _entries = [];
   bool _loading = true;
-
-  // Stage 5 Track B: current search text.
   String _searchQuery = '';
+  String? _selectedId; // the card that is currently bigger
 
   @override
   void initState() {
@@ -36,7 +35,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Stage 5 Track B: entries that match the search text (title, text or tag).
   List<Entry> get _filteredEntries {
     if (_searchQuery.isEmpty) return _entries;
     final query = _searchQuery.toLowerCase();
@@ -47,7 +45,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
   }
 
-  // Stage 2: open the create screen and wait for the new Entry.
   Future<void> _openCreateScreen() async {
     final newEntry = await Navigator.push<Entry>(
       context,
@@ -56,10 +53,42 @@ class _HomeScreenState extends State<HomeScreen> {
     if (newEntry != null) {
       setState(() {
         _entries.insert(0, newEntry);
-        _entries.sort((a, b) => b.date.compareTo(a.date)); // newest first
+        _entries.sort((a, b) => b.date.compareTo(a.date));
       });
-      saveEntries(_entries); // Stage 3: save after adding
+      saveEntries(_entries);
     }
+  }
+
+  // Called by the detail screen after an edit.
+  void _updateEntry(Entry updated) {
+    setState(() {
+      final index = _entries.indexWhere((e) => e.id == updated.id);
+      if (index != -1) _entries[index] = updated;
+      _entries.sort((a, b) => b.date.compareTo(a.date));
+    });
+    saveEntries(_entries);
+  }
+
+  // Called by the detail screen after a delete.
+  void _deleteEntry(String id) {
+    setState(() {
+      _entries.removeWhere((e) => e.id == id);
+      if (_selectedId == id) _selectedId = null;
+    });
+    saveEntries(_entries);
+  }
+
+  void _openDetail(Entry entry) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EntryDetailScreen(
+          entry: entry,
+          onUpdate: _updateEntry,
+          onDelete: _deleteEntry,
+        ),
+      ),
+    );
   }
 
   void _openSettings() {
@@ -83,7 +112,8 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(icon, size: 64, color: Colors.grey),
             const SizedBox(height: 16),
-            Text(title, style: const TextStyle(fontSize: 18, color: Colors.grey)),
+            Text(title,
+                style: const TextStyle(fontSize: 18, color: Colors.grey)),
             const SizedBox(height: 8),
             Text(subtitle, style: const TextStyle(color: Colors.grey)),
             if (showButton) ...[
@@ -126,7 +156,6 @@ class _HomeScreenState extends State<HomeScreen> {
       itemCount: entries.length,
       itemBuilder: (context, index) {
         final entry = entries[index];
-        // Stage 3: swipe left to delete.
         return Dismissible(
           key: ValueKey(entry.id),
           direction: DismissDirection.endToStart,
@@ -156,12 +185,17 @@ class _HomeScreenState extends State<HomeScreen> {
             ) ??
                 false;
           },
-          onDismissed: (direction) {
-            // Remove by id, so it is correct even while a search is active.
-            setState(() => _entries.removeWhere((e) => e.id == entry.id));
-            saveEntries(_entries);
-          },
-          child: EntryCard(entry: entry),
+          onDismissed: (direction) => _deleteEntry(entry.id),
+          child: EntryCard(
+            entry: entry,
+            isSelected: _selectedId == entry.id,
+            onTap: () {
+              setState(() {
+                _selectedId = (_selectedId == entry.id) ? null : entry.id;
+              });
+            },
+            onOpen: () => _openDetail(entry),
+          ),
         );
       },
     );
@@ -186,7 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Stage 5 Track B: search field.
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: TextField(

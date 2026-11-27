@@ -9,50 +9,85 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _reminderEnabled = false;
-  TimeOfDay _reminderTime = const TimeOfDay(hour: 20, minute: 0);
+  bool _notificationOn = false;
+  TimeOfDay _time = const TimeOfDay(hour: 20, minute: 0);
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    _load();
   }
 
-  Future<void> _loadSettings() async {
-    final service = NotificationService.instance;
-    final enabled = await service.isReminderEnabled();
-    final time = await service.getReminderTime();
-    setState(() {
-      _reminderEnabled = enabled;
-      _reminderTime = TimeOfDay(hour: time.hour, minute: time.minute);
-    });
-  }
-
-  Future<void> _toggleReminder(bool enabled) async {
-    final service = NotificationService.instance;
-    if (enabled) {
-      // Android 13+ asks the user to allow notifications
-      final allowed = await service.requestPermission();
-      if (!allowed) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please allow notifications for this app.')),
-        );
-        return; // keep the switch off
-      }
-      await service.scheduleReminder(_reminderTime.hour, _reminderTime.minute);
-    } else {
-      await service.cancelReminder();
+  // Load the saved on/off state and time.
+  Future<void> _load() async {
+    try {
+      final service = NotificationService.instance;
+      final enabled = await service.isReminderEnabled();
+      final t = await service.getReminderTime();
+      if (!mounted) return;
+      setState(() {
+        _notificationOn = enabled;
+        _time = TimeOfDay(hour: t.hour, minute: t.minute);
+      });
+    } catch (_) {
+      // ignore: keep the defaults
     }
-    if (!mounted) return;
-    setState(() => _reminderEnabled = enabled);
+  }
+
+  // Called when the switch is tapped. No error message is shown.
+  Future<void> _toggle(bool value) async {
+    // The switch always changes right away.
+    setState(() => _notificationOn = value);
+    try {
+      final service = NotificationService.instance;
+      if (value) {
+        await service.requestPermission();
+        await service.scheduleReminder(_time.hour, _time.minute);
+      } else {
+        await service.cancelReminder();
+      }
+    } catch (_) {
+      // ignore: no error message for the user
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(context: context, initialTime: _time);
+    if (picked != null) {
+      setState(() => _time = picked);
+      try {
+        await NotificationService.instance
+            .scheduleReminder(picked.hour, picked.minute);
+      } catch (_) {
+        // ignore: no error message for the user
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // TODO: implement build
-    throw UnimplementedError();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ListView(
+        children: [
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications),
+            title: const Text('Notification'),
+            subtitle: Text(
+              _notificationOn ? 'On, ${_time.format(context)}' : 'Off',
+            ),
+            value: _notificationOn,
+            onChanged: _toggle,
+          ),
+          if (_notificationOn)
+            ListTile(
+              leading: const Icon(Icons.access_time),
+              title: const Text('Time'),
+              subtitle: Text(_time.format(context)),
+              onTap: _pickTime,
+            ),
+        ],
+      ),
+    );
   }
-
-// TODO: Build the UI below
 }

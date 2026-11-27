@@ -5,20 +5,38 @@ import 'package:intl/intl.dart';
 import '../data/sample_entries.dart'; // for availableTags
 import '../models/entry.dart';
 
+// Used for BOTH creating a new memory and editing an existing one.
+// entry == null  -> new memory
+// entry != null  -> edit that memory
 class CreateEntryScreen extends StatefulWidget {
-  const CreateEntryScreen({super.key});
+  final Entry? entry;
+
+  const CreateEntryScreen({super.key, this.entry});
 
   @override
   State<CreateEntryScreen> createState() => _CreateEntryScreenState();
 }
 
 class _CreateEntryScreenState extends State<CreateEntryScreen> {
-  final TextEditingController _titleController = TextEditingController();
-  final TextEditingController _textController = TextEditingController();
+  late final TextEditingController _titleController;
+  late final TextEditingController _textController;
+  late DateTime _selectedDate;
+  late final Set<String> _selectedTags;
+  late List<String> _imagePaths;
 
-  DateTime _selectedDate = DateTime.now();
-  final Set<String> _selectedTags = {}; // Stage 4
-  String? _imagePath;
+  bool get _isEditing => widget.entry != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.entry;
+    // When editing, start with the values of the existing memory.
+    _titleController = TextEditingController(text: e?.title ?? '');
+    _textController = TextEditingController(text: e?.text ?? '');
+    _selectedDate = e?.date ?? DateTime.now();
+    _selectedTags = {...?e?.tags};
+    _imagePaths = [...?e?.imagePaths];
+  }
 
   @override
   void dispose() {
@@ -39,16 +57,21 @@ class _CreateEntryScreenState extends State<CreateEntryScreen> {
     }
   }
 
-  // Stage 5 Track A: choose a photo from the gallery.
-  Future<void> _pickPhoto() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-    );
-    if (picked != null) {
-      setState(() => _imagePath = picked.path);
-    }
+  // Choose several photos at once and ADD them to the list.
+  Future<void> _addPhotos() async {
+    final picked = await ImagePicker().pickMultiImage(imageQuality: 80);
+    if (picked.isEmpty) return;
+    setState(() {
+      for (final file in picked) {
+        if (!_imagePaths.contains(file.path)) {
+          _imagePaths.add(file.path);
+        }
+      }
+    });
+  }
+
+  void _removePhoto(int index) {
+    setState(() => _imagePaths.removeAt(index));
   }
 
   void _save() {
@@ -64,31 +87,39 @@ class _CreateEntryScreenState extends State<CreateEntryScreen> {
       return;
     }
 
-    final newEntry = Entry(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      title: title,
-      text: _textController.text.trim(),
-      date: _selectedDate,
-      tags: _selectedTags.toList(),
-      imagePath: _imagePath,
-    );
+    final Entry result;
+    if (_isEditing) {
+      // Same id, new values.
+      result = widget.entry!.copyWith(
+        title: title,
+        text: _textController.text.trim(),
+        date: _selectedDate,
+        tags: _selectedTags.toList(),
+        imagePaths: _imagePaths,
+      );
+    } else {
+      result = Entry(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: title,
+        text: _textController.text.trim(),
+        date: _selectedDate,
+        tags: _selectedTags.toList(),
+        imagePaths: _imagePaths,
+      );
+    }
 
-    Navigator.pop(context, newEntry);
+    Navigator.pop(context, result);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Memory'),
+        title: Text(_isEditing ? 'Edit Memory' : 'New Memory'),
         actions: [
-          TextButton(
-              onPressed: _save
-              , child: const Text('Save')
-          ),
+          TextButton(onPressed: _save, child: const Text('Save')),
         ],
       ),
-      // ListView (not Column) so the form scrolls when the keyboard opens.
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -121,7 +152,6 @@ class _CreateEntryScreenState extends State<CreateEntryScreen> {
               label: Text(DateFormat('EEE, d MMM yyyy').format(_selectedDate)),
             ),
           ),
-          // Stage 4: tag selection.
           const SizedBox(height: 16),
           Text(
             _selectedTags.isEmpty
@@ -148,39 +178,67 @@ class _CreateEntryScreenState extends State<CreateEntryScreen> {
               );
             }).toList(),
           ),
-          // Stage 5 Track A: photo preview or "Add Photo" button.
           const SizedBox(height: 16),
-          if (_imagePath != null) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.file(
-                File(_imagePath!),
-                height: 200,
-                width: double.infinity,
-                fit: BoxFit.cover,
+          Text(
+            _imagePaths.isEmpty
+                ? 'Photos'
+                : 'Photos (${_imagePaths.length})',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          // Photos in a row you can scroll sideways. X removes a photo.
+          if (_imagePaths.isNotEmpty)
+            SizedBox(
+              height: 120,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _imagePaths.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  return Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(
+                          File(_imagePaths[index]),
+                          width: 120,
+                          height: 120,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stack) => Container(
+                            width: 120,
+                            height: 120,
+                            color: Colors.grey.shade300,
+                            child: const Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: GestureDetector(
+                          onTap: () => _removePhoto(index),
+                          child: const CircleAvatar(
+                            radius: 12,
+                            backgroundColor: Colors.black54,
+                            child: Icon(Icons.close,
+                                size: 16, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: _pickPhoto,
-                  child: const Text('Change photo'),
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _imagePath = null),
-                  child: const Text('Remove photo'),
-                ),
-              ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _addPhotos,
+              icon: const Icon(Icons.add_photo_alternate),
+              label: const Text('Add photos'),
             ),
-          ] else
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: _pickPhoto,
-                icon: const Icon(Icons.photo_library),
-                label: const Text('Add Photo'),
-              ),
-            ),
+          ),
         ],
       ),
     );
